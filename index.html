@@ -1,0 +1,523 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>100M Sprint Lab</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: #10151d;
+    color: #f5f7fa;
+    font-family: system-ui, sans-serif;
+    text-align: center;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+  main { max-width: 850px; margin: auto; }
+  h1 { margin: 5px 0; font-size: 28px; }
+  .sub { color: #9ba8b9; margin: 0 0 18px; }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .stat {
+    background: #1b2431;
+    border: 1px solid #303b4a;
+    border-radius: 10px;
+    padding: 12px 5px;
+  }
+  .stat small { display: block; color: #9ba8b9; }
+  .stat strong { font-size: 22px; }
+  canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: #202b39;
+    border-radius: 12px;
+    border: 1px solid #303b4a;
+    touch-action: manipulation;
+  }
+  .feedback {
+    background: #1b2431;
+    border-radius: 10px;
+    padding: 12px;
+    margin: 12px 0;
+  }
+  #feedback { font-size: 20px; font-weight: 800; }
+  #phase { color: #aab8c9; font-size: 13px; margin-top: 4px; }
+  .bar {
+    height: 12px;
+    background: #354052;
+    border-radius: 20px;
+    overflow: hidden;
+    margin-top: 8px;
+  }
+  #staminaFill {
+    height: 100%;
+    width: 100%;
+    background: #55d99a;
+    transition: width .08s linear;
+  }
+  .controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  button {
+    min-height: 82px;
+    border: 1px solid #526176;
+    border-radius: 12px;
+    background: #263447;
+    color: white;
+    font-size: 22px;
+    font-weight: 800;
+    touch-action: manipulation;
+  }
+  button:active { background: #405774; transform: scale(.98); }
+  button:disabled { opacity: .45; }
+  #restart {
+    min-height: 48px;
+    width: 100%;
+    margin-top: 12px;
+    background: #d9f99d;
+    color: #14200c;
+    border: none;
+  }
+  .help { color: #9ba8b9; font-size: 13px; line-height: 1.5; }
+  #results {
+    display: none;
+    background: #1b2431;
+    border: 1px solid #526176;
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 12px;
+  }
+  #results h2 { margin-top: 0; }
+  @media (max-width: 430px) {
+    body { padding: 10px; }
+    h1 { font-size: 24px; }
+    .stat strong { font-size: 19px; }
+    button { min-height: 76px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>100M SPRINT LAB</h1>
+  <p class="sub">Rhythm. Acceleration. Execution.</p>
+
+  <section class="stats">
+    <div class="stat">
+      <small>RACE TIME</small>
+      <strong id="time">0.00s</strong>
+    </div>
+    <div class="stat">
+      <small>SPEED</small>
+      <strong id="speed">0</strong>
+    </div>
+    <div class="stat">
+      <small>DISTANCE</small>
+      <strong id="distance">0m</strong>
+    </div>
+  </section>
+
+  <canvas id="track" width="800" height="370"
+    aria-label="100 metre race track with four runners"></canvas>
+
+  <section class="feedback">
+    <div id="feedback">READY</div>
+    <div id="phase">Phase 1: Slow · Target 0.52s</div>
+    <div class="bar"><div id="staminaFill"></div></div>
+    <small>STAMINA</small>
+    <div id="accuracy">Cadence accuracy: --</div>
+  </section>
+
+  <section class="controls">
+    <button id="left" disabled>LEFT TAP</button>
+    <button id="right" disabled>RIGHT TAP</button>
+  </section>
+
+  <p class="help">
+    Start with LEFT, then alternate RIGHT and LEFT.<br>
+    Match the target interval. Random rapid tapping won't win.
+  </p>
+
+  <section id="results">
+    <h2>FINISH</h2>
+    <p id="resultTime"></p>
+    <p id="resultPlace"></p>
+    <button id="restart">RUN AGAIN</button>
+  </section>
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  const canvas = document.getElementById("track");
+  const ctx = canvas.getContext("2d");
+
+  const ui = {
+    time: document.getElementById("time"),
+    speed: document.getElementById("speed"),
+    distance: document.getElementById("distance"),
+    feedback: document.getElementById("feedback"),
+    phase: document.getElementById("phase"),
+    accuracy: document.getElementById("accuracy"),
+    stamina: document.getElementById("staminaFill"),
+    left: document.getElementById("left"),
+    right: document.getElementById("right"),
+    results: document.getElementById("results"),
+    resultTime: document.getElementById("resultTime"),
+    resultPlace: document.getElementById("resultPlace"),
+    restart: document.getElementById("restart")
+  };
+
+  const phases = [
+    { end: 10, name: "Slow", target: 0.52 },
+    { end: 20, name: "Slow-Fast", target: 0.49 },
+    { end: 30, name: "Normal", target: 0.46 },
+    { end: 40, name: "Normal-Fast", target: 0.44 },
+    { end: 60, name: "Fast", target: 0.42 },
+    { end: 100, name: "Float", target: 0.41 }
+  ];
+
+  const runners = [
+    { name: "YOU", color: "#d9f99d", player: true, x: 0, speed: 0 },
+    { name: "RIVAL 1", color: "#ff7c70", x: 0, speed: 250 },
+    { name: "RIVAL 2", color: "#70c7ff", x: 0, speed: 275 },
+    { name: "RIVAL 3", color: "#c6a0ff", x: 0, speed: 300 }
+  ];
+
+  const FINISH = 5000;
+  const MAX_SPEED = 420;
+
+  let state;
+  let countdownStart;
+  let raceTime;
+  let lastFrame;
+  let lastTapTime;
+  let nextTap;
+  let cadence;
+  let accuracy;
+  let idealCadence;
+  let stamina;
+  let finishedOrder;
+  let lastFeedback;
+  let feedbackUntil;
+  let phaseIndex;
+  let raceStart;
+
+  function reset() {
+    state = "countdown";
+    countdownStart = performance.now();
+    raceStart = 0;
+    raceTime = 0;
+    lastFrame = performance.now();
+    lastTapTime = null;
+    nextTap = "left";
+    cadence = 0;
+    accuracy = 0;
+    idealCadence = phases[0].target;
+    stamina = 100;
+    finishedOrder = [];
+    lastFeedback = "READY";
+    feedbackUntil = 0;
+    phaseIndex = 0;
+
+    runners[0].x = 0;
+    runners[0].speed = 0;
+    for (let i = 1; i < runners.length; i++) {
+      runners[i].x = 0;
+      runners[i].finished = false;
+    }
+
+    ui.results.style.display = "none";
+    ui.left.disabled = true;
+    ui.right.disabled = true;
+    ui.feedback.textContent = "3";
+    ui.time.textContent = "0.00s";
+    ui.speed.textContent = "0";
+    ui.distance.textContent = "0m";
+    ui.accuracy.textContent = "Cadence accuracy: --";
+    ui.stamina.style.width = "100%";
+    ui.phase.textContent = "Phase 1: Slow · Target 0.52s";
+    draw();
+  }
+
+  function getPhase(distance) {
+    return phases.findIndex(p => distance < p.end);
+  }
+
+  function tap(side) {
+    if (state !== "running") return;
+
+    if (side !== nextTap) {
+      lastFeedback = "WRONG FOOT!";
+      feedbackUntil = performance.now() + 350;
+      return;
+    }
+
+    const now = performance.now() / 1000;
+    const distance = runners[0].x / 50;
+    phaseIndex = Math.max(0, getPhase(distance));
+    idealCadence = phases[phaseIndex].target;
+
+    if (lastTapTime === null) {
+      // The opening tap starts the sprint.
+      accuracy = 1;
+      runners[0].speed += 30;
+      lastFeedback = "START!";
+    } else {
+      cadence = now - lastTapTime;
+
+      // Compare this interval with the current phase's target.
+      accuracy = Math.max(
+        0,
+        Math.min(1, 1 - Math.abs(cadence - idealCadence) / idealCadence)
+      );
+
+      // Correct rhythm produces stronger acceleration.
+      runners[0].speed += 30 * accuracy;
+
+      if (accuracy >= 0.90) lastFeedback = "PERFECT!";
+      else if (accuracy >= 0.70) lastFeedback = "GOOD";
+      else if (cadence < idealCadence) lastFeedback = "TOO EARLY";
+      else lastFeedback = "TOO LATE";
+    }
+
+    runners[0].speed = Math.min(MAX_SPEED, runners[0].speed);
+    lastTapTime = now;
+    nextTap = side === "left" ? "right" : "left";
+    feedbackUntil = performance.now() + 450;
+  }
+
+  function finish(runner) {
+    if (runner.finished) return;
+    runner.finished = true;
+    finishedOrder.push(runner);
+  }
+
+  function update(dt, now) {
+    if (state === "countdown") {
+      const elapsed = (now - countdownStart) / 1000;
+      if (elapsed < 1) ui.feedback.textContent = "3";
+      else if (elapsed < 2) ui.feedback.textContent = "2";
+      else if (elapsed < 3) ui.feedback.textContent = "1";
+      else if (elapsed < 3.6) ui.feedback.textContent = "GO!";
+      else {
+        state = "running";
+        raceStart = now;
+        ui.left.disabled = false;
+        ui.right.disabled = false;
+      }
+      return;
+    }
+
+    if (state !== "running") return;
+
+    raceTime = (now - raceStart) / 1000;
+
+    const player = runners[0];
+
+    // Speed naturally decays between taps.
+    player.speed = Math.max(0, player.speed - player.speed * 1.2 * dt);
+
+    // Stamina drains at higher speeds and recovers at lower speeds.
+    if (player.speed > 150) stamina -= 12 * dt;
+    else stamina += 8 * dt;
+    stamina = Math.max(0, Math.min(100, stamina));
+
+    const staminaMultiplier = 0.5 + 0.5 * stamina / 100;
+    player.x += player.speed * staminaMultiplier * dt;
+    player.x = Math.min(FINISH, player.x);
+
+    if (player.x >= FINISH) finish(player);
+
+    // Three computer opponents with different fixed speeds.
+    for (let i = 1; i < runners.length; i++) {
+      const rival = runners[i];
+      if (!rival.finished) {
+        rival.x += rival.speed * dt;
+        if (rival.x >= FINISH) {
+          rival.x = FINISH;
+          finish(rival);
+        }
+      }
+    }
+
+    const dist = Math.min(100, player.x / 50);
+    phaseIndex = Math.max(0, getPhase(dist));
+    idealCadence = phases[phaseIndex].target;
+
+    ui.time.textContent = raceTime.toFixed(2) + "s";
+    ui.speed.textContent = Math.round(player.speed);
+    ui.distance.textContent = Math.floor(dist) + "m";
+    ui.stamina.style.width = stamina + "%";
+    ui.phase.textContent =
+      "Phase " + (phaseIndex + 1) + ": " + phases[phaseIndex].name +
+      " · Target " + idealCadence.toFixed(2) + "s";
+    ui.accuracy.textContent =
+      "Cadence accuracy: " + Math.round(accuracy * 100) + "%";
+
+    if (now > feedbackUntil) {
+      ui.feedback.textContent = nextTap === "left"
+        ? "LEFT NEXT"
+        : "RIGHT NEXT";
+    }
+
+    if (player.finished) {
+      state = "finished";
+      ui.left.disabled = true;
+      ui.right.disabled = true;
+      const place = finishedOrder.indexOf(player) + 1;
+      ui.results.style.display = "block";
+      ui.resultTime.textContent = "Your time: " + raceTime.toFixed(2) + "s";
+      ui.resultPlace.textContent = "Position: " + place + " of 4";
+      ui.feedback.textContent = "RACE COMPLETE";
+    }
+  }
+
+  function drawRunner(x, y, color, label, progress, player) {
+    const start = 95;
+    const end = canvas.width - 55;
+    const px = start + (end - start) * progress;
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(px, y - 13, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = player ? 5 : 4;
+    ctx.lineCap = "round";
+
+    ctx.beginPath();
+    ctx.moveTo(px, y - 6);
+    ctx.lineTo(px - 2, y + 9);
+    ctx.moveTo(px - 1, y);
+    ctx.lineTo(px - 11, y + 5);
+    ctx.moveTo(px - 1, y);
+    ctx.lineTo(px + 9, y - 5);
+    ctx.moveTo(px - 2, y + 9);
+    ctx.lineTo(px - 10, y + 18);
+    ctx.moveTo(px - 2, y + 9);
+    ctx.lineTo(px + 8, y + 17);
+    ctx.stroke();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "11px system-ui";
+    ctx.fillText(label, 12, y + 4);
+
+    ctx.fillStyle = "#344154";
+    ctx.fillRect(start, y + 23, end - start, 3);
+    ctx.fillStyle = color;
+    ctx.fillRect(start, y + 23, (end - start) * progress, 3);
+  }
+
+  function draw() {
+    const w = canvas.width;
+    const h = canvas.height;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "#202b39";
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.fillStyle = "#29394b";
+    ctx.fillRect(0, 45, w, 280);
+
+    for (let i = 0; i < 4; i++) {
+      const y = 75 + i * 68;
+      ctx.strokeStyle = "#718096";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([7, 7]);
+      ctx.beginPath();
+      ctx.moveTo(0, y + 29);
+      ctx.lineTo(w, y + 29);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    const start = 95;
+    const end = w - 55;
+
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(start, 45);
+    ctx.lineTo(start, 325);
+    ctx.stroke();
+
+    ctx.strokeStyle = "#d9f99d";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(end, 45);
+    ctx.lineTo(end, 325);
+    ctx.stroke();
+
+    ctx.fillStyle = "#d9f99d";
+    ctx.font = "bold 12px system-ui";
+    ctx.fillText("100m", end - 19, 32);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText("START", start - 19, 32);
+
+    runners.forEach((runner, i) => {
+      drawRunner(
+        runner.x / FINISH,
+        65 + i * 68,
+        runner.color,
+        runner.name,
+        runner.x / FINISH,
+        i === 0
+      );
+    });
+
+    ctx.fillStyle = "#9ba8b9";
+    ctx.font = "12px system-ui";
+    ctx.fillText("PROTOTYPE TRACK · 100 METRES", 12, 355);
+  }
+
+  function loop(now) {
+    const dt = Math.min((now - lastFrame) / 1000, 0.05);
+    lastFrame = now;
+    update(dt, now);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  ui.left.addEventListener("pointerdown", event => {
+    event.preventDefault();
+    tap("left");
+  });
+
+  ui.right.addEventListener("pointerdown", event => {
+    event.preventDefault();
+    tap("right");
+  });
+
+  document.addEventListener("keydown", event => {
+    if (event.repeat) return;
+    if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") {
+      tap("left");
+    }
+    if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") {
+      tap("right");
+    }
+  });
+
+  ui.restart.addEventListener("click", reset);
+
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
